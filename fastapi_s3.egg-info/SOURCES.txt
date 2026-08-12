@@ -1,0 +1,15 @@
+README.md
+pyproject.toml
+app/__init__.py
+app/main.py
+app/api/__init__.py
+app/api/files.py
+app/storage/__init__.py
+app/storage/interface.py
+app/storage/s3.py
+fastapi_s3.egg-info/PKG-INFO
+fastapi_s3.egg-info/SOURCES.txt
+fastapi_s3.egg-info/dependency_links.txt
+fastapi_s3.egg-info/requires.txt
+fastapi_s3.egg-info/top_level.txt
+tests/test_files.py

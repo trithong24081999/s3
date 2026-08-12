@@ -1,0 +1,18 @@
+[project]
+name = "fastapi-s3"
+version = "0.1.0"
+description = "Production-ready FastAPI S3 upload project"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "boto3>=1.28.0",
+    "pydantic-settings>=2.0.0",
+    "python-multipart>=0.0.6",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.4.0",
+    "httpx>=0.24.1",
+]
