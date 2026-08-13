@@ -1,0 +1,31 @@
+# Garage configuration for the cold storage tier.
+#
+# Secrets are intentionally absent from this file. `rpc_secret` and
+# `admin_token` are supplied through the GARAGE_RPC_SECRET and
+# GARAGE_ADMIN_TOKEN environment variables in docker-compose, which read them
+# from `.env` -- keeping credentials out of version control.
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+
+# Single-node development cluster. Raise this (and add nodes) before treating
+# any of this as durable storage -- the archive tier is the *only* copy of an
+# object once the tiering job has deleted the hot original.
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+# Must match GARAGE_REGION on the application side or signatures fail.
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+# The app uses path-style addressing (bucket in the URL path), which is what
+# S3Storage configures boto3 for.
+root_domain = ".s3.garage.localhost"
+
+[admin]
+# Bound inside the compose network only. This port is never published to the
+# host -- the Garage admin API must not be reachable from outside.
+api_bind_addr = "[::]:3903"

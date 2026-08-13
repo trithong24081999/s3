@@ -1,4 +1,5 @@
 services:
+  # --- Hot tier: fresh uploads land here ---------------------------------
   localstack:
     image: localstack/localstack:latest
     ports:
@@ -9,3 +10,59 @@ services:
       LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN}
     volumes:
       - "./init-s3.sh:/etc/localstack/init/ready.d/init-s3.sh"
+    networks:
+      - storage_net
+
+  # --- Cold tier: objects older than TIERING_MAX_AGE_DAYS end up here -----
+  garage:
+    image: dxflrs/garage:v1.0.1
+    ports:
+      # Published so `python -m app.tiering` can reach it from the host.
+      - "127.0.0.1:${GARAGE_S3_PORT:-3910}:3900"
+    volumes:
+      - ./garage/garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?copy the Garage block from .env.example into .env}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?copy the Garage block from .env.example into .env}
+    healthcheck:
+      # The image ships no shell, so the binary is invoked directly.
+      test: ["CMD", "/garage", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - storage_net
+
+  # Runs to completion and exits. Safe to re-run: every step checks the current
+  # state before changing anything.
+  garage-init:
+    image: alpine:3.20
+    depends_on:
+      garage:
+        condition: service_healthy
+    volumes:
+      - ./scripts/garage-init.sh:/usr/local/bin/garage-init.sh:ro
+    environment:
+      GARAGE_ADMIN_URL: http://garage:3903
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?copy the Garage block from .env.example into .env}
+      GARAGE_ACCESS_KEY_ID: ${GARAGE_ACCESS_KEY_ID:?copy the Garage block from .env.example into .env}
+      GARAGE_SECRET_ACCESS_KEY: ${GARAGE_SECRET_ACCESS_KEY:?copy the Garage block from .env.example into .env}
+      GARAGE_BUCKET: ${GARAGE_BUCKET:-uploads-archive}
+    command:
+      - sh
+      - -c
+      - apk add --no-cache curl jq >/dev/null && exec /usr/local/bin/garage-init.sh
+    restart: "no"
+    networks:
+      - storage_net
+
+volumes:
+  garage_meta:
+  garage_data:
+
+networks:
+  storage_net:

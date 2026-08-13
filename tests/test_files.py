@@ -1,33 +1,24 @@
+import io
+
 import pytest
+from PIL import Image
 from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.api.files import get_storage_interface
-from app.storage.interface import StorageInterface, StorageError, StorageObjectNotFoundError
+from app.storage.interface import StorageError, StorageObjectNotFoundError
 from app.storage.s3 import S3Storage
+from tests.fakes import InMemoryStorage
 
-class MockStorage(StorageInterface):
-    def __init__(self):
-        self.uploads = []
-        self.should_fail = False
-        self.fail_not_found = False
-
-    def upload_file(self, stream, object_key, content_type="", bucket=None):
-        if self.should_fail:
-            raise StorageError("Mocked error", transient=True)
-        if self.fail_not_found:
-            raise StorageObjectNotFoundError("Mocked not found error")
-        
-        self.uploads.append({
-            "key": object_key,
-            "content_type": content_type,
-            "bucket": bucket
-        })
+def make_image_bytes(size=(200, 100), fmt="PNG", mode="RGB"):
+    buffer = io.BytesIO()
+    Image.new(mode, size, color="red").save(buffer, format=fmt)
+    return buffer.getvalue()
 
 @pytest.fixture
 def mock_storage():
-    storage = MockStorage()
+    storage = InMemoryStorage()
     app.dependency_overrides[get_storage_interface] = lambda: storage
     yield storage
     app.dependency_overrides = {}
@@ -63,6 +54,53 @@ def test_storage_error_returns_500(client, mock_storage):
         files={"file": ("test.txt", b"test", "text/plain")}
     )
     assert response.status_code == 500
+
+def test_resize_preserves_aspect_ratio(client, mock_storage):
+    mock_storage.put("uploads/a/pic.png", make_image_bytes((200, 100)))
+
+    response = client.get("/api/files/resize", params={"key": "uploads/a/pic.png", "width": 50})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    with Image.open(io.BytesIO(response.content)) as img:
+        assert img.size == (50, 25)
+
+
+def test_resize_rgba_source_to_jpeg(client, mock_storage):
+    mock_storage.put("uploads/a/pic.jpg", make_image_bytes((120, 60), fmt="JPEG"))
+
+    response = client.get(
+        "/api/files/resize",
+        params={"key": "uploads/a/pic.jpg", "width": 60, "height": 30},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    with Image.open(io.BytesIO(response.content)) as img:
+        assert img.size == (60, 30)
+
+
+def test_resize_requires_a_dimension(client, mock_storage):
+    response = client.get("/api/files/resize", params={"key": "uploads/a/pic.png"})
+    assert response.status_code == 400
+
+
+def test_resize_missing_object_returns_404(client, mock_storage):
+    response = client.get("/api/files/resize", params={"key": "nope.png", "width": 10})
+    assert response.status_code == 404
+
+
+def test_resize_non_image_returns_400(client, mock_storage):
+    mock_storage.put("uploads/a/doc.pdf", b"not an image")
+    response = client.get("/api/files/resize", params={"key": "uploads/a/doc.pdf", "width": 10})
+    assert response.status_code == 400
+
+
+def test_resize_storage_failure_returns_503(client, mock_storage):
+    mock_storage.should_fail = True
+    response = client.get("/api/files/resize", params={"key": "uploads/a/pic.png", "width": 10})
+    assert response.status_code == 503
+
 
 def test_transient_error_classification():
     from botocore.exceptions import ClientError
